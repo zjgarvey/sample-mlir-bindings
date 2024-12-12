@@ -48,7 +48,7 @@ def save_static_conv_module():
 
 def save_dynamic_conv_module():
     """A basic example of importing a torch.nn.Module to torch-mlir with dynamic dims."""
-    sample_shape = (5, 2, 10, 20)
+    sample_shape = (6, 2, 10, 20)
     sample_input = torch.ones(sample_shape)
     torch_module = Conv2dWithPaddingModule()
     test_name = "conv_2d_with_padding_dynamic"
@@ -56,7 +56,7 @@ def save_dynamic_conv_module():
     batch = Dim("batch", max=10)
     height = Dim("height", min=7)
     width = Dim("width", min=1)
-    dynamic_shapes = {"x": {0: batch, 2: height, 3: width}}
+    dynamic_shapes = {"x": {0: 2*batch, 2: height, 3: width}}
 
     # save the mlir file
     m_dynamic = export_and_import(
@@ -64,6 +64,7 @@ def save_dynamic_conv_module():
         sample_input,
         output_type="torch",
         dynamic_shapes=dynamic_shapes,
+        import_symbolic_shape_expressions=True,
     )
     dynamic_path = Path(__file__).parents[1] / "mlir" / f"{test_name}.mlir"
     with open(dynamic_path, "w") as f:

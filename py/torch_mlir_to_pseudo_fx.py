@@ -1,9 +1,14 @@
+import torch_mlir
+import torch_mlir._mlir_libs
 from torch_mlir.ir import Module, Context, WalkResult
+from torch_mlir.extras.fx_importer import TORCH_DTYPE_TO_MLIR_TYPE_ASM
 from torch_mlir.dialects import torch as torch_d
 from pathlib import Path
 from typing import Dict, Any, List, Union
 import argparse
 
+
+MLIR_TYPE_ASM_TO_TORCH_DTYPE = {value : key for key, value in TORCH_DTYPE_TO_MLIR_TYPE_ASM.items()}
 
 def load_module_from_path(file_path: Union[Path, str]) -> Module:
     # register the torch dialect with a context
@@ -15,9 +20,27 @@ def load_module_from_path(file_path: Union[Path, str]) -> Module:
         m = Module.parse(f.read(), ctx)
     return m
 
+def hacky_get_dialect_resources(m: Module) -> Dict[str,str]:
+    m_lines : List[str] = m.operation.get_asm().split("\n")
+    dialect_resources = dict()
+    key_idx_start = None
+    key_idx_end = None
+    for idx, l in enumerate(m_lines):
+        if l == "{-#":
+            key_idx_start = idx
+        if l =="#-}":
+            key_idx_end = idx
+    assert key_idx_start is not None and key_idx_end is not None
+    for line in m_lines[key_idx_start+3:key_idx_end-2]:
+        line = line.lstrip(" ")
+        key = line[0:line.find(":")]
+        value = line[line.find('"')+1:-1]
+        dialect_resources[key] = value
+    return dialect_resources
 
 def get_pseudo_fx_graph(m: Module) -> List[str]:
     # get the func op
+    dialect_resources = hacky_get_dialect_resources(m)
     func_op = m.body.operations[0]
     instruction_strings: List[str] = []
 
@@ -68,6 +91,48 @@ def get_pseudo_fx_graph(m: Module) -> List[str]:
                     l.append(opd.get_name())
             list_associator[result.get_name()] = l
             return WalkResult(0)
+        view = op.opview
+        # the opview often contains some extra info.
+        # this is probably better than string matching the op name:
+        if isinstance(view, torch_d.ValueTensorLiteralOp):
+            try:
+                value = torch_mlir.ir.DenseResourceElementsAttr(view.attributes["value"])
+                lt_index = str(value).find("<")
+                gt_index = str(value).find(">")
+                handle_name = str(value)[lt_index+1:gt_index]
+                blob_hex_string = dialect_resources[handle_name]
+                print(f'{result.get_name()} with type {value.type} has resource string: {blob_hex_string}')
+                # Dense resources have a ranked tensor type (which has some better python bindings than value tensor type)
+                # Here is an example of getting the dims and dtype, with the slightly tedious caveat that signedness
+                # of dtypes is not recognized, so si32 and ui32 tensors would both be stored as i32. For this reason,
+                # it might be better to get the dtype from !torch.vtensor<[shape],dtype> string parsing, with a TODO to add
+                # python bindings for ValueTensorType and NonValueTensorType...
+                ranked_type = torch_mlir.ir.RankedTensorType(value.type)
+                shape = [dim for dim in ranked_type.shape]
+                print(f'shape = {shape}')
+                builtin_dtype_asm = str(ranked_type.element_type)
+                try: 
+                    torch_dtype = MLIR_TYPE_ASM_TO_TORCH_DTYPE[builtin_dtype_asm]
+                except KeyError:
+                    torch_dtype = MLIR_TYPE_ASM_TO_TORCH_DTYPE['s'+builtin_dtype_asm]
+                print(f'torch_dtype = {torch_dtype}\n')
+                return WalkResult(0)
+            except ValueError:
+                #pass
+                print(f"{value} is not a dense resource elements attr!")
+            
+            # If it is not a dense resource elements attr, then do something else:
+            try:
+                value = torch_mlir.ir.DenseElementsAttr(view.attributes["value"])
+                # do something
+                print(f'found a DenseElementsAttr : {value}\n')
+                return WalkResult(0)
+            except ValueError:
+                # pass
+                print(f"{value} is not a dense elements attr!")
+
+            print(f"{value} unhandled\n") 
+            return WalkResult(1)
 
         result_type = result.type
         # TODO: find something that converts IR types back to torch types
