@@ -1,4 +1,5 @@
 import numpy as np
+import struct
 from torch_mlir.ir import Module, Context, WalkResult, WalkOrder, DenseResourceElementsAttr
 from torch_mlir.dialects import torch as torch_d
 from pathlib import Path
@@ -26,6 +27,31 @@ TYPE_MAP = {
     "si16": 'int16_type',
     "si32": 'int32_type',
     "si64": 'int64_type'
+}
+
+NP_TYPE_MAP = {
+    'bool_type': np.uint0,
+    'half_type': np.half,
+    'float_type': np.float32,
+    'double_type': np.float64,
+    'uint8_type': np.uint8,
+    'int8_type': np.int8,
+    'int16_type': np.int16,
+    'int32_type': np.int32,
+    'int64_type': np.int64,
+}
+
+
+PACK_CHAR_FROM_MGX_DTYPE = {
+    'bool_type': "?",
+    'half_type': "h",
+    'float_type': "f",
+    'double_type': "d",
+    'uint8_type': "B",
+    'int8_type': "b",
+    'int16_type': "h",
+    'int32_type': "i",
+    'int64_type': "q",
 }
 
 CONVERTERS = {}
@@ -76,6 +102,17 @@ def hacky_get_dialect_resources(m: Module):
     return dialect_resources
 
 
+def decode_hex_string(hex_str, mgx_type, shape, from_resource_blob=True):
+    assert mgx_type in NP_TYPE_MAP and mgx_type in PACK_CHAR_FROM_MGX_DTYPE
+    
+    start_idx = 10 if from_resource_blob else 2
+    buffer = bytes.fromhex(hex_str[start_idx:])
+    num_elem = np.prod(shape) if len(shape) > 0 else np.array([1])
+    value_tuple = struct.unpack(PACK_CHAR_FROM_MGX_DTYPE[mgx_type] * num_elem, buffer)
+    return np.array(value_tuple, dtype=NP_TYPE_MAP[mgx_type]).reshape(shape)
+
+
+
 @migraphx_converter("torch.aten.convolution")
 def torchmlir_convolution(mm, op, node_map):
     # torch.aten.convolution signature:
@@ -83,7 +120,8 @@ def torchmlir_convolution(mm, op, node_map):
     assert len(op.operands) == 9
     mgx_inputs = [node_map[i.get_name()] for i in op.operands]
     input, weight, bias = mgx_inputs[:3]
-    stride, padding, dilation, transposed, output_padding, groups = mgx_inputs[3:]
+    stride, padding, dilation, transposed, output_padding, groups = mgx_inputs[
+        3:]
 
     if transposed:
         raise RuntimeError("'transposed' parameter not supported.")
@@ -104,7 +142,7 @@ def torchmlir_convolution(mm, op, node_map):
         bias_mgx = mm.add_instruction(
             migraphx.op('broadcast', axis=1, out_lens=out_shape), [bias])
         out_mgx = mm.add_instruction(migraphx.op('add'), [out_mgx, bias_mgx])
-    
+
     return out_mgx
 
 
@@ -196,30 +234,20 @@ class MLIRInterpreter:
         shape, dtype = type_parser(str(op.result.type))
         mgx_shape = migraphx.shape(lens=shape, type=dtype)
 
-        ### TODO: remove
-        NP_TYPE_MAP = {
-            'bool_type': np.uint0,
-            'half_type': np.half,
-            'float_type': np.float32,
-            'double_type': np.float64,
-            'uint8_type': np.uint8,
-            'int8_type': np.int8,
-            'int16_type': np.int16,
-            'int32_type': np.int32,
-            'int64_type': np.int64,
-        }
-        if dtype in ["half_type", "float_type", "double_type"]:
-            rand_literal = np.random.randn(*shape).astype(NP_TYPE_MAP[dtype])
-        else:
-            rand_literal = np.random.randint(0, size=shape).astype(
-                NP_TYPE_MAP[dtype])
-        ###
+        lit = decode_hex_string(tensor_hex_string, dtype, shape)
+        # ### TODO: remove
+        # if dtype in ["half_type", "float_type", "double_type"]:
+        #     rand_literal = np.random.randn(*shape).astype(NP_TYPE_MAP[dtype])
+        # else:
+        #     rand_literal = np.random.randint(0, size=shape).astype(
+        #         NP_TYPE_MAP[dtype])
+        # ###
 
-        mgx_lit = self.mm.add_literal(rand_literal)
+        mgx_lit = self.mm.add_literal(lit)
         self.IR_MAPPING[op.result.get_name()] = mgx_lit
 
         return WalkResult(0)
-    
+
     def add_return(self, op):
         outs = [self.IR_MAPPING[i.get_name()] for i in op.operands]
         self.mm.add_return(outs)
