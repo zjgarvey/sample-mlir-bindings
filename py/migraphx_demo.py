@@ -4,7 +4,7 @@ from migraphx_utils import load_module_from_path
 import migraphx
 
 if __name__ == "__main__":
-    mlir_mod = load_module_from_path("../mlir/conv_2d_with_padding_static.mlir")
+    mlir_mod = load_module_from_path("../mlir/resnet50.mlir")
     interp = MLIRInterpreter(mlir_mod)
     interp.run()
     print(interp.program)
@@ -12,8 +12,8 @@ if __name__ == "__main__":
     p = interp.program
     p.compile(migraphx.get_target('gpu'))
     
-    inputs = np.load("../artifacts/inputs/conv_2d_with_padding_static.npy")
-    gold_outputs = np.load("../artifacts/outputs/conv_2d_with_padding_static_torch.npy")
+    inputs = np.load("../artifacts/inputs/resnet50.npy")
+    gold_outputs = np.load("../artifacts/outputs/resnet50.npy")
 
     mgx_outputs = np.array(p.run({p.get_parameter_names()[0]: inputs})[0]).reshape(gold_outputs.shape)
 

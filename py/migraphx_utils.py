@@ -58,7 +58,7 @@ def type_parser(type_str):
 
     # For now assuming trye_str will ALWAYS be in the form "!torch.vtensor<[shape],dtype>"
     lens, mlir_type = type_str.strip("!torch.vtensor<>[").split("],")
-    lens = [int(l) for l in lens.split(",")]
+    lens = [int(l) for l in lens.split(",")] if len(lens) > 0 else []
     mgx_type = TYPE_MAP[mlir_type]
 
     return lens, mgx_type
@@ -78,7 +78,7 @@ def hacky_get_dialect_resources(m: Module):
     for line in m_lines[key_idx_start + 3:key_idx_end - 2]:
         line = line.lstrip(" ")
         key = line[0:line.find(":")]
-        value = line[line.find('"') + 1:-1]
+        value = line[line.find('"') + 1:line.rfind('"')]
         dialect_resources[key] = value
     return dialect_resources
 
