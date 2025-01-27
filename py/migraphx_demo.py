@@ -13,7 +13,7 @@ if __name__ == "__main__":
     p.compile(migraphx.get_target('gpu'))
     
     inputs = np.load("../artifacts/inputs/resnet50.npy")
-    gold_outputs = np.load("../artifacts/outputs/resnet50.npy")
+    gold_outputs = np.load("../artifacts/outputs/resnet50_torch.npy")
 
     mgx_outputs = np.array(p.run({p.get_parameter_names()[0]: inputs})[0]).reshape(gold_outputs.shape)
 
