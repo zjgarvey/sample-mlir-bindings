@@ -95,7 +95,7 @@ def save_resnet_module():
 
     # save the mlir file
     with torch.no_grad():
-        m_static = export_and_import(torch_module, sample_input, output_type="torch")
+        m_static = export_and_import(torch_module, sample_input, output_type="torch", experimental_support_mutation=True)
     static_path = Path(__file__).parents[1] / "mlir" / f"{test_name}.mlir"
     with open(static_path, "w") as f:
         f.write(m_static.operation.get_asm())

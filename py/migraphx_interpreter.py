@@ -104,6 +104,5 @@ class MLIRInterpreter:
     def run(self):
         assert len(self.module.body.operations) == 1
         func_op = self.module.body.operations[0]
-        # self.add_inputs(func_op)
         func_op.walk(self.process_op, WalkOrder.PRE_ORDER)
-        print(self.program)
+        # print(self.program)

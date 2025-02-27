@@ -7,7 +7,7 @@ if __name__ == "__main__":
     mlir_mod = load_module_from_path("../mlir/resnet50.mlir")
     interp = MLIRInterpreter(mlir_mod)
     interp.run()
-    print(interp.program)
+    # print(interp.program)
 
     p = interp.program
     p.compile(migraphx.get_target('gpu'))
